@@ -4,7 +4,7 @@ from constraint import Problem
 problem = Problem()
 
 
-#var
+#var, domain
 
 # Séc
 problem.addVariable("Security_Lecture", [("Sun", 1), ("Mon", 1), ("Tue", 1), ("Wed", 2), ("Thu", 3)])
