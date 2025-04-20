@@ -1,92 +1,272 @@
-from constraint import Problem
+import webbrowser
+import random
 
+DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu"]
+SLOTS_PER_DAY = {"Sun": 5, "Mon": 5, "Tue": 3, "Wed": 5, "Thu": 5}
 
-problem = Problem()
+courses = {
+    "Securite": ("Teacher1", 2),
+    "MF": ("Teacher2", 2),
+    "AN": ("Teacher3", 2),
+    "ENT": ("Teacher4", 1),
+    "RO2": ("Teacher5", 2),
+    "DAIC": ("Teacher6", 2),
+    "RES": ("Teacher7", 2),
+    "RES_TP": ("Teacher8", 1),
+    "AI": ("Teacher11", 2),
+    "AI_TP": ("Teacher12", 1),
+}
 
+teacher_courses = {}
+for course, (teacher, _) in courses.items():
+    teacher_courses.setdefault(teacher, []).append(course)
 
-#var, domain
+sessions = []
+for course, (teacher, count) in courses.items():
+    if course.endswith("_TP"):
+        sessions.append((course, teacher))
+    else:
+        sessions.append((f"{course}_L", teacher))
+        if count == 2:
+            sessions.append((f"{course}_TD", teacher))
 
-# Séc
-problem.addVariable("Security_Lecture", [("Sun", 1), ("Mon", 1), ("Tue", 1), ("Wed", 2), ("Thu", 3)])
-problem.addVariable("Security_TD", [("Sun", 2), ("Mon", 3), ("Tue", 2), ("Wed", 4), ("Thu", 5)])
+session_names = [s[0] for s in sessions]
+session_teachers = [s[1] for s in sessions]
 
-# MF
-problem.addVariable("Methods_Formelles_Lecture", [("Sun", 1), ("Mon", 2), ("Tue", 1), ("Wed", 4), ("Thu", 5)])
-problem.addVariable("Methods_Formelles_TD", [("Sun", 2), ("Mon", 4), ("Tue", 1), ("Wed", 3), ("Thu", 5)])
+def generate_domains():
+    domains = {}
+    for session in session_names:
+        dom = [(day, slot) for day in DAYS for slot in range(SLOTS_PER_DAY[day])]
+        random.shuffle(dom)
+        domains[session] = dom
+    return domains
 
-# Anum
-problem.addVariable("Numerical_Analysis_Lecture", [("Sun", 3), ("Mon", 2), ("Tue", 1), ("Wed", 3), ("Thu", 4)])
-problem.addVariable("Numerical_Analysis_TD", [("Sun", 4), ("Mon", 3), ("Tue", 2), ("Wed", 2), ("Thu", 1)])
+def is_valid(assignment, var, value):
+    day, hour = value
+    current_teacher = session_teachers[session_names.index(var)]
 
-# ESN
-problem.addVariable("Entrepreneurship_Lecture", [("Sun", 1), ("Mon", 2), ("Tue", 1), ("Wed", 3), ("Thu", 4)])
+    for k, (d, h) in assignment.items():
+        if d == day and h == hour:
+            return False
+        if d == day and h == hour and k.split("_")[0] == var.split("_")[0] and k != var:
+            return False
+        if d == day:
+            if abs(h - hour) <= 2 and k != var:
+                same_day_hours = sorted(set(
+                    [hh for kk, (dd, hh) in assignment.items() if dd == day] + [hour]
+                ))
+                for i in range(len(same_day_hours) - 3):
+                    if same_day_hours[i+3] - same_day_hours[i] == 3:
+                        return False
 
-# RO2
-problem.addVariable("Operations_Research_Lecture", [("Sun", 1), ("Mon", 3), ("Tue", 1), ("Wed", 2), ("Thu", 4)])
-problem.addVariable("Operations_Research_TD", [("Sun", 2), ("Mon", 4), ("Tue", 2), ("Wed", 5), ("Thu", 3)])
+    teacher_days = set()
+    for k, (d, _) in assignment.items():
+        if session_teachers[session_names.index(k)] == current_teacher:
+            teacher_days.add(d)
+    teacher_days.add(day)
+    if len(teacher_days) > 2:
+        return False
 
-# Archi
-problem.addVariable("Distributed_Architecture_Lecture", [("Sun", 1), ("Mon", 2), ("Tue", 1), ("Wed", 3), ("Thu", 4)])
-problem.addVariable("Distributed_Architecture_TD", [("Sun", 2), ("Mon", 3), ("Tue", 1), ("Wed", 4), ("Thu", 5)])
-
-# RSX2
-problem.addVariable("Networks_Lecture", [("Sun", 1), ("Mon", 2), ("Tue", 1), ("Wed", 3), ("Thu", 4)])
-problem.addVariable("Networks_TD", [("Sun", 2), ("Mon", 3), ("Tue", 2), ("Wed", 4), ("Thu", 5)])
-problem.addVariable("Networks_TP", [("Sun", 3), ("Mon", 4), ("Tue", 1), ("Wed", 5), ("Thu", 3)])
-
-# AI 
-problem.addVariable("AI_Lecture", [("Sun", 1), ("Mon", 2), ("Tue", 1), ("Wed", 3), ("Thu", 4)])
-problem.addVariable("AI_TD", [("Sun", 2), ("Mon", 3), ("Tue", 1), ("Wed", 4), ("Thu", 5)])
-problem.addVariable("AI_TP", [("Sun", 3), ("Mon", 4), ("Tue", 2), ("Wed", 5), ("Thu", 3)])
-
-#---------------------------------------------------CONSTRAINTS----------------------------------------------------
-
-
-# No overlapping cons
-def no_overlap(sec_lecture, sec_td):
-    return sec_lecture != sec_td
-
-problem.addConstraint(no_overlap, ["Security_Lecture", "Security_TD"])
-problem.addConstraint(no_overlap, ["Methods_Formelles_Lecture", "Methods_Formelles_TD"])
-problem.addConstraint(no_overlap, ["Numerical_Analysis_Lecture", "Numerical_Analysis_TD"])
-problem.addConstraint(no_overlap, ["Operations_Research_Lecture", "Operations_Research_TD"])
-problem.addConstraint(no_overlap, ["Distributed_Architecture_Lecture", "Distributed_Architecture_TD"])
-problem.addConstraint(no_overlap, ["Networks_Lecture", "Networks_TD", "Networks_TP"])
-problem.addConstraint(no_overlap, ["AI_Lecture", "AI_TD", "AI_TP"])
-
-# No more than 3 successive slots
-def no_more_than_three_consecutive(*slots):
-    # Check if any of the sessions are in consecutive slots
-    for i in range(len(slots) - 1):
-        day, slot = slots[i]
-        next_day, next_slot = slots[i + 1]
-        if day == next_day and slot + 1 == next_slot:
-            return False  # consecutive slot
     return True
 
+def select_unassigned(assignment, domains):
+    unassigned = [v for v in session_names if v not in assignment]
+    return min(unassigned, key=lambda var: len(domains[var]))
 
-problem.addConstraint(no_more_than_three_consecutive, ["Security_Lecture", "Security_TD"])
-problem.addConstraint(no_more_than_three_consecutive, ["Methods_Formelles_Lecture", "Methods_Formelles_TD"])
-problem.addConstraint(no_more_than_three_consecutive, ["Numerical_Analysis_Lecture", "Numerical_Analysis_TD"])
-problem.addConstraint(no_more_than_three_consecutive, ["Operations_Research_Lecture", "Operations_Research_TD"])
-problem.addConstraint(no_more_than_three_consecutive, ["Distributed_Architecture_Lecture", "Distributed_Architecture_TD"])
-problem.addConstraint(no_more_than_three_consecutive, ["Networks_Lecture", "Networks_TD", "Networks_TP"])
-problem.addConstraint(no_more_than_three_consecutive, ["AI_Lecture", "AI_TD", "AI_TP"])
+def order_domain_values(var, domains):
+    values = domains[var]
+    return sorted(values, key=lambda val: count_conflicts(var, val, domains))
 
-# no overlapping sessions for the same teacher
-def teacher_not_in_two_places_at_same_time(*slots):
-    seen = set()
-    for day, slot in slots:
-        if (day, slot) in seen:
-            return False  
-        seen.add((day, slot))
-    return True
+def count_conflicts(var, value, domains):
+    conflicts = 0
+    day, hour = value
+    current_teacher = session_teachers[session_names.index(var)]
 
+    for other_var in domains:
+        if other_var != var:
+            for other_val in domains[other_var]:
+                other_day, other_hour = other_val
+                other_teacher = session_teachers[session_names.index(other_var)]
 
-problem.addConstraint(teacher_not_in_two_places_at_same_time, ["Security_Lecture", "Security_TD"])
-problem.addConstraint(teacher_not_in_two_places_at_same_time, ["Methods_Formelles_Lecture", "Methods_Formelles_TD"])
-problem.addConstraint(teacher_not_in_two_places_at_same_time, ["Numerical_Analysis_Lecture", "Numerical_Analysis_TD"])
-problem.addConstraint(teacher_not_in_two_places_at_same_time, ["Operations_Research_Lecture", "Operations_Research_TD"])
-problem.addConstraint(teacher_not_in_two_places_at_same_time, ["Distributed_Architecture_Lecture", "Distributed_Architecture_TD"])
-problem.addConstraint(teacher_not_in_two_places_at_same_time, ["Networks_Lecture", "Networks_TD", "Networks_TP"])
-problem.addConstraint(teacher_not_in_two_places_at_same_time, ["AI_Lecture", "AI_TD", "AI_TP"])
+                if day == other_day and hour == other_hour:
+                    conflicts += 1
+                if day == other_day and hour == other_hour and other_var.split("_")[0] == var.split("_")[0]:
+                    conflicts += 1
+                if other_teacher == current_teacher and other_day == day:
+                    teacher_days = set()
+                    for v in domains:
+                        if v != var and v != other_var:
+                            for d, _ in domains[v]:
+                                if session_teachers[session_names.index(v)] == current_teacher:
+                                    teacher_days.add(d)
+                    teacher_days.add(day)
+                    if len(teacher_days) > 2:
+                        conflicts += 1
+    return conflicts
+
+def backtrack(assignment, domains):
+    if len(assignment) == len(session_names):
+        return assignment
+    var = select_unassigned(assignment, domains)
+    for value in order_domain_values(var, domains):
+        if is_valid(assignment, var, value):
+            assignment[var] = value
+            new_domains = {}
+            for v in domains:
+                if v in assignment:
+                    new_domains[v] = [assignment[v]]
+                else:
+                    new_domains[v] = [val for val in domains[v] if is_valid(assignment, v, val)]
+            result = backtrack(assignment, new_domains)
+            if result:
+                return result
+            del assignment[var]
+    return None
+
+COLORS = {
+    'Securite': '#FFC0CB',
+    'MF': '#ADD8E6',
+    'AN': '#90EE90',
+    'ENT': '#FFD700',
+    'RO2': '#1E90FF',
+    'DAIC': '#FFA07A',
+    'RES': '#D3D3D3',
+    'RES_TP': '#C0C0C0',
+    'AI': '#BA55D3',
+    'AI_TP': '#9370DB'
+}
+
+LABELS = {
+    "Securite_L": "SEC-L", "Securite_TD": "SEC-TD",
+    "MF_L": "MF-L", "MF_TD": "MF-TD",
+    "AN_L": "AN-L", "AN_TD": "AN-TD",
+    "ENT_L": "ENT",
+    "RO2_L": "RO2-L", "RO2_TD": "RO2-TD",
+    "DAIC_L": "DAIC-L", "DAIC_TD": "DAIC-TD",
+    "RES_L": "RES-L", "RES_TD": "RES-TD", "RES_TP": "RES-TP",
+    "AI_L": "AI-L", "AI_TD": "AI-TD", "AI_TP": "AI-TP"
+}
+
+def get_subject(key):
+    return key.split("_")[0]
+
+def generate_html(solution):
+    html = """
+    <html><head>
+    <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f4f6f9;
+            margin: 20px;
+            color: #333;
+        }
+        h2, h3 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px auto;
+            background: #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            border: 1px solid #e0e0e0;
+            padding: 12px;
+            text-align: center;
+        }
+        th {
+            background-color: #f7f9fc;
+            font-weight: 600;
+        }
+        td {
+            background-color: #fafafa;
+        }
+        .empty {
+            color: #aaa;
+            font-style: italic;
+        }
+        div.session {
+            border-radius: 8px;
+            padding: 8px;
+            color: #222;
+            font-weight: 500;
+            line-height: 1.4em;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05);
+        }
+        .session small {
+            display: block;
+            font-size: 0.8em;
+            color: #555;
+            margin-top: 4px;
+        }
+        table:last-of-type {
+            width: 60%;
+        }
+    </style>
+    </head><body>
+    <h2>📅 Semester 2 Timetable - Group 1CS</h2>
+    <table>
+      <tr><th>Day / Slot</th>""" + "".join(f"<th>Slot {i+1}</th>" for i in range(5)) + "</tr>"
+
+    for day in DAYS:
+        html += f"<tr><th>{day}</th>"
+        for slot in range(5):
+            cell = ""
+            for session, (d, h) in solution.items():
+                if d == day and h == slot:
+                    subject = get_subject(session)
+                    label = LABELS.get(session, session[:6])
+                    teacher = session_teachers[session_names.index(session)]
+                    color = COLORS.get(subject, "#FFFFFF")
+                    cell = (
+                        f'<div class="session" style="background:{color}">'
+                        f"{label}<small>{teacher}</small></div>"
+                    )
+                    break
+            if not cell and slot < SLOTS_PER_DAY[day]:
+                cell = '<div class="empty">Free</div>'
+            elif not cell:
+                cell = '<div class="empty">-</div>'
+            html += f"<td>{cell}</td>"
+        html += "</tr>"
+
+    html += """
+    </table>
+    <h3>👩‍🏫 Teacher Workload Summary</h3>
+    <table>
+        <tr><th>Teacher</th><th>Days Working</th><th>Courses</th></tr>"""
+
+    teacher_stats = {}
+    for teacher in teacher_courses:
+        days = set()
+        for session, (d, _) in solution.items():
+            if session_teachers[session_names.index(session)] == teacher:
+                days.add(d)
+        teacher_stats[teacher] = {
+            'days': len(days),
+            'courses': ", ".join(teacher_courses[teacher])
+        }
+
+    for teacher, stats in teacher_stats.items():
+        html += f"<tr><td>{teacher}</td><td>{stats['days']}</td><td>{stats['courses']}</td></tr>"
+
+    html += "</table></body></html>"
+
+    with open("output.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    webbrowser.open("output.html")
+
+if __name__ == "__main__":
+    while True:
+        solution = backtrack({}, generate_domains())
+        if solution:
+            generate_html(solution)
+            break
+        else:
+            print("No valid timetable found, retrying...")
